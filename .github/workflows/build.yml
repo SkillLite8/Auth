@@ -1,7 +1,12 @@
+name: Build EndStone Plugin
+
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -14,22 +19,20 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Unzip plugin
-        run: unzip endstone-zenauth-v2.zip
+        run: unzip -o endstone-zenauth-v2.zip
 
       - name: Install build tools
         run: pip install hatchling build
 
       - name: Build WHL
-        run: |
-          cd endstone-zenauth
-          python -m build --wheel
+        run: python -m build --wheel
 
       - name: Upload WHL
         uses: actions/upload-artifact@v4
         with:
           name: endstone-zenauth-whl
-          path: endstone-zenauth/dist/*.whl
+          path: dist/*.whl
           retention-days: 90
