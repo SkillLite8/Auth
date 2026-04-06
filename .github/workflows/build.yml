@@ -16,22 +16,17 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Unzip plugin
-        run: unzip endstone-zenauth.zip
+          python-version: "3.12"
 
       - name: Install build tools
         run: pip install hatchling build
 
       - name: Build WHL
-        run: |
-          cd endstone-zenauth
-          python -m build --wheel
+        run: python -m build --wheel
 
       - name: Upload WHL
         uses: actions/upload-artifact@v4
         with:
           name: endstone-zenauth-whl
-          path: endstone-zenauth/dist/*.whl
+          path: dist/*.whl
           retention-days: 90
