@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Unzip plugin
-        run: unzip -o endstone-zenauth-v5.zip
+        run: unzip -o endstone-zenauth-v6.zip
 
       - name: Install build tools
         run: pip install hatchling build
