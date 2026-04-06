@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Unzip
+        run: unzip endstone-zenauth-v2.zip
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
