@@ -22,13 +22,17 @@ jobs:
           python-version: "3.12"
 
       - name: Unzip plugin
-        run: unzip -o endstone-zenauth.zip
+        run: |
+          unzip -o endstone-zenauth.zip
+          DIR=$(dirname $(find . -name "pyproject.toml" -not -path './.git/*' | head -1))
+          echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
 
       - name: Install build tools
         run: pip install hatchling build
 
       - name: Build WHL
-        run: python -m build --wheel
+        run: python -m build --wheel --outdir $GITHUB_WORKSPACE/dist
+        working-directory: ${{ env.PROJ_DIR }}
 
       - name: Upload WHL
         uses: actions/upload-artifact@v4
@@ -36,6 +40,3 @@ jobs:
           name: endstone-zenauth-whl
           path: dist/*.whl
           retention-days: 90
-
-
-
