@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Unzip plugin
-        run: unzip -o ZenAuth.zip
+        run: unzip -o endstone-zenauth.zip
 
       - name: Install build tools
         run: pip install hatchling build
@@ -36,3 +36,6 @@ jobs:
           name: endstone-zenauth-whl
           path: dist/*.whl
           retention-days: 90
+
+
+
