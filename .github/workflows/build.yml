@@ -23,7 +23,7 @@ jobs:
 
       - name: Unzip plugin
         run: |
-          unzip -o endstone-zenauth.zip
+          unzip -o statpro.zip
           DIR=$(dirname $(find . -name "pyproject.toml" -not -path './.git/*' | head -1))
           echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
 
