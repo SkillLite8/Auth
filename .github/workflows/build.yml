@@ -1,4 +1,4 @@
-name: Build EndStone Plugin
+name: Build PingSystem Plugin
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
 
       - name: Unzip plugin
         run: |
-          unzip -o statpro.zip
+          unzip -o PingSystem.zip
           DIR=$(dirname $(find . -name "pyproject.toml" -not -path './.git/*' | head -1))
           echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
 
@@ -37,6 +37,6 @@ jobs:
       - name: Upload WHL
         uses: actions/upload-artifact@v4
         with:
-          name: endstone-zenauth-whl
+          name: endstone-pingsystem-whl
           path: dist/*.whl
           retention-days: 90
