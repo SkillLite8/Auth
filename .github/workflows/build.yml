@@ -23,8 +23,10 @@ jobs:
 
       - name: Unzip plugin
         run: |
-          unzip -o PingSystem.zip
-          DIR=$(dirname $(find . -name "pyproject.toml" -not -path './.git/*' | head -1))
+          ZIP=$(find . -name "*.zip" -not -path './.git/*' | head -1)
+          echo "Found: $ZIP"
+          unzip -o "$ZIP" -d extracted
+          DIR=$(dirname $(find extracted -name "pyproject.toml" | head -1))
           echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
 
       - name: Install build tools
