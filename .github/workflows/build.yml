@@ -1,4 +1,4 @@
-name: Build PingSystem Plugin
+name: Build StatPro Plugin
 
 on:
   push:
@@ -23,10 +23,16 @@ jobs:
 
       - name: Unzip plugin
         run: |
+          # Поиск zip-архива с исходниками
           ZIP=$(find . -name "*.zip" -not -path './.git/*' | head -1)
-          echo "Found: $ZIP"
-          unzip -o "$ZIP" -d extracted
-          DIR=$(dirname $(find extracted -name "pyproject.toml" | head -1))
+          if [ -z "$ZIP" ]; then
+            echo "Zip file not found, checking current directory for pyproject.toml"
+            DIR=$(dirname $(find . -name "pyproject.toml" | head -1))
+          else
+            echo "Found zip: $ZIP"
+            unzip -o "$ZIP" -d extracted
+            DIR=$(dirname $(find extracted -name "pyproject.toml" | head -1))
+          fi
           echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
 
       - name: Install build tools
@@ -39,6 +45,6 @@ jobs:
       - name: Upload WHL
         uses: actions/upload-artifact@v4
         with:
-          name: endstone-pingsystem-whl
+          name: endstone-statpro-whl
           path: dist/*.whl
           retention-days: 90
