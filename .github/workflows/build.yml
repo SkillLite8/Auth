@@ -24,17 +24,21 @@ jobs:
       - name: Install build tools
         run: pip install hatchling build
 
+      - name: Debug - show repo structure
+        run: find . -not -path './.git/*' | sort
+
       - name: Find project directory
         id: find_proj
         run: |
-          # Ищем pyproject.toml напрямую в репо (без архива)
-          TOML=$(find . -name "pyproject.toml" -not -path './.git/*' | head -1)
+          TOML=$(find . -not -path './.git/*' -name "pyproject.toml" 2>/dev/null | head -1)
           if [ -z "$TOML" ]; then
-            echo "❌ pyproject.toml не найден"
+            echo "❌ pyproject.toml не найден, содержимое репо:"
+            find . -not -path './.git/*' | sort
             exit 1
           fi
           DIR=$(dirname "$TOML")
-          echo "✅ Найден: $TOML"
+          echo "✅ Найден pyproject.toml: $TOML"
+          echo "✅ Рабочая папка: $DIR"
           echo "proj_dir=$DIR" >> $GITHUB_OUTPUT
 
       - name: Build WHL
