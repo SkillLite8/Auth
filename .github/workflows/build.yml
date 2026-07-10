@@ -1,4 +1,4 @@
-name: Build Executable
+name: Build Go Executable
 
 on:
   push:
@@ -8,24 +8,29 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
       with:
-        node-version: 18
+        go-version: '1.21'
 
-    - name: Install Tools & Dependencies
+    - name: Initialize Go Module & Fetch Dependencies
       run: |
-        npm install -g pkg
-        npm install bedrock-protocol
+        go mod init dumper
+        go get github.com/sandertv/gophertunnel@master
+        go get github.com/google/uuid
+        go mod tidy
 
-    - name: Compile JS to EXE
-      run: pkg main.js --targets node18-win-x64 --options no-warnings --public --output dist/dumper.exe
+    - name: Compile to Windows EXE
+      env:
+        GOOS: windows
+        GOARCH: amd64
+      run: go build -ldflags="-s -w" -o dist/dumper.exe main.go
 
     - name: Upload Artifact (.EXE)
       uses: actions/upload-artifact@v4
