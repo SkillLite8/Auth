@@ -25,7 +25,7 @@ jobs:
         npm install bedrock-protocol
 
     - name: Compile JS to EXE
-      run: pkg main.js --targets node18-win-x64 --output dist/dumper.exe
+      run: pkg main.js --targets node18-win-x64 --options no-warnings --public --output dist/dumper.exe
 
     - name: Upload Artifact (.EXE)
       uses: actions/upload-artifact@v4
