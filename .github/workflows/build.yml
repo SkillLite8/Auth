@@ -1,49 +1,40 @@
-name: Build Admin Plugin
+name: Build EXE
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  push:
+    branches:
+      - main
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Unzip plugin
+      - name: Install dependencies
         run: |
-          ZIP=$(find . -name "*.zip" -not -path './.git/*' | head -1)
-          if [ -z "$ZIP" ]; then
-            echo "Zip not found, ищем pyproject.toml напрямую"
-            DIR=$(dirname $(find . -name "pyproject.toml" -not -path './.git/*' | head -1))
-          else
-            echo "Найден архив: $ZIP"
-            unzip -o "$ZIP" -d extracted
-            DIR=$(dirname $(find extracted -name "pyproject.toml" | head -1))
-          fi
-          echo "PROJ_DIR=$DIR" >> $GITHUB_ENV
+          python -m pip install --upgrade pip
+          pip install pyinstaller keyboard
 
-      - name: Install build tools
-        run: pip install hatchling build
+      - name: Build EXE
+        run: |
+          pyinstaller ^
+          --onefile ^
+          --windowed ^
+          --clean ^
+          --name AutoClicker ^
+          main.py
 
-      - name: Build WHL
-        run: python -m build --wheel --outdir $GITHUB_WORKSPACE/dist
-        working-directory: ${{ env.PROJ_DIR }}
-
-      - name: Upload WHL
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: endstone-admin-whl
-          path: dist/*.whl
-          retention-days: 90
+          name: AutoClicker
+          path: dist/AutoClicker.exe
