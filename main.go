@@ -222,14 +222,13 @@ func main() {
 
 	if strings.TrimSpace(strings.ToLower(useXbox)) == "y" {
 		logMsg("\x1b[1;33m⏳ Откройте ссылку в браузере и введите код.\x1b[0m")
-		
-		// === ИСПРАВЛЕНИЕ: используем RequestLiveRefreshToken ===
-		var err error
-		tokenSrc, err = auth.RequestLiveRefreshToken()
+		token, err := auth.RequestLiveToken()
 		if err != nil {
 			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
 			return
 		}
+		// Используем RefreshTokenSource для создания работающего TokenSource
+		tokenSrc = auth.RefreshTokenSource(token, nil)
 		logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
 	} else {
 		tokenSrc = nil
