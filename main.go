@@ -22,7 +22,7 @@ import (
 const (
 	outputDir   = "./resource_packs"
 	logFile     = "rp_dumper.log"
-	gameVersion = "1.20.30"
+	gameVersion = "1.21.0" // Используем актуальную версию протокола
 )
 
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -80,10 +80,14 @@ func (d *Dumper) Run() error {
 	logMsg(fmt.Sprintf("\x1b[1;36m📦 Найдено %d ресурс-паков\x1b[0m", len(packs)))
 
 	for i, pack := range packs {
-		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание: %s\x1b[0m",
-			i+1, len(packs), pack.UUID().String()))
-		if err := d.downloadPack(pack); err != nil {
-			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка: %v\x1b[0m", err))
+		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание: %s\x1b[0m", i+1, len(packs), pack.UUID().String()))
+		
+		_ = os.MkdirAll(outputDir, os.ModePerm)
+		outPath := filepath.Join(outputDir, pack.UUID().String()+".zip")
+		
+		err := d.download(pack.Reader(), outPath)
+		if err != nil {
+			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка скачивания: %v\x1b[0m", err))
 		}
 	}
 
@@ -100,16 +104,6 @@ func (d *Dumper) connect() error {
 		GameVersion:         gameVersion,
 		ServerAddress:       fmt.Sprintf("%s:%d", d.host, d.port),
 		SkinID:              "Default",
-		SkinData:            "",
-		SkinImageWidth:      0,
-		SkinImageHeight:     0,
-		SkinResourcePatch:   "",
-		SkinGeometry:        "",
-		SkinGeometryVersion: "",
-		SkinAnimationData:   "",
-		CapeData:            "",
-		CapeImageWidth:      0,
-		CapeImageHeight:     0,
 		TrustedSkin:         true,
 		LanguageCode:        "ru_RU",
 	}
@@ -128,21 +122,9 @@ func (d *Dumper) connect() error {
 	return nil
 }
 
-func (d *Dumper) downloadPack(pack interface{}) error {
-	type Pack interface {
-		UUID() uuid.UUID
-		Reader() io.ReadCloser
-	}
-	p, ok := pack.(Pack)
-	if !ok {
-		return fmt.Errorf("неверный тип ресурс-пака")
-	}
-
-	rc := p.Reader()
+func (d *Dumper) download(rc io.ReadCloser, outPath string) error {
 	defer rc.Close()
 
-	_ = os.MkdirAll(outputDir, os.ModePerm)
-	outPath := filepath.Join(outputDir, p.UUID().String()+".zip")
 	f, err := os.Create(outPath)
 	if err != nil {
 		return err
@@ -200,7 +182,7 @@ func main() {
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
 
 	logMsg("\x1b[1;35m╔══════════════════════════════════════════════════════╗\x1b[0m")
-	logMsg("\x1b[1;35m║     🛸  NeverTime RP Dumper v7.0  (Go)             ║\x1b[0m")
+	logMsg("\x1b[1;35m║     🛸  NeverTime RP Dumper v8.0  (Stable)         ║\x1b[0m")
 	logMsg("\x1b[1;35m║          Скачивание ресурс-паков с обходом         ║\x1b[0m")
 	logMsg("\x1b[1;35m╚══════════════════════════════════════════════════════╝\x1b[0m")
 
@@ -209,7 +191,7 @@ func main() {
 	cmd, _ := reader.ReadString('\n')
 	if strings.TrimSpace(cmd) != "packs" {
 		logMsg("Выход.")
-		return
+		return // Здесь консоль закроется, так как не ввели packs
 	}
 
 	fmt.Print("IP:Порт сервера (например mc.nevertime.su:19132): ")
@@ -218,23 +200,33 @@ func main() {
 
 	fmt.Print("Использовать Xbox Auth? (y/n): ")
 	useXbox, _ := reader.ReadString('\n')
+	
 	var tokenSrc oauth2.TokenSource
+	isAuthError := false
 
 	if strings.TrimSpace(strings.ToLower(useXbox)) == "y" {
 		logMsg("\x1b[1;33m⏳ Откройте ссылку в браузере и введите код.\x1b[0m")
-		token, err := auth.RequestLiveToken()
+		var err error
+		tokenSrc, err = auth.RequestLiveToken()
 		if err != nil {
-			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
-			return
+			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена Xbox: %v\x1b[0m", err))
+			isAuthError = true
+		} else {
+			logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
 		}
-		tokenSrc = oauth2.StaticTokenSource(token)
-		logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
 	} else {
 		tokenSrc = nil
 	}
 
-	dumper := NewDumper(host, port, tokenSrc)
-	if err := dumper.Run(); err != nil {
-		logMsg(fmt.Sprintf("\x1b[1;31m❌ Критическая ошибка: %v\x1b[0m", err))
+	// Если не было критической ошибки авторизации — запускаем дамп
+	if !isAuthError {
+		dumper := NewDumper(host, port, tokenSrc)
+		if err := dumper.Run(); err != nil {
+			logMsg(fmt.Sprintf("\x1b[1;31m❌ Критическая ошибка: %v\x1b[0m", err))
+		}
 	}
+
+	// ОЖИДАНИЕ ПЕРЕД ЗАКРЫТИЕМ: чтобы можно было прочитать ошибку
+	fmt.Print("\nНажмите Enter, чтобы закрыть программу...")
+	reader.ReadString('\n')
 }
