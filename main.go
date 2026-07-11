@@ -226,7 +226,9 @@ func main() {
 	// Определяем версию сервера
 	logMsg("\x1b[1;33m⏳ Пинг сервера...\x1b[0m")
 	version := ""
-	pong, err := minecraft.Ping(fmt.Sprintf("%s:%d", host, port))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pong, err := minecraft.PingContext(ctx, fmt.Sprintf("%s:%d", host, port))
 	if err == nil {
 		version = pong.Version
 		logMsg(fmt.Sprintf("✅ Версия сервера: %s", version))
