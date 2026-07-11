@@ -18,6 +18,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.21'
+        cache: true # Включает кэширование модулей для ускорения сборки
 
     - name: Initialize Go Module & Fetch Dependencies
       run: |
@@ -30,10 +31,13 @@ jobs:
       env:
         GOOS: windows
         GOARCH: amd64
-      run: go build -ldflags="-s -w" -o dist/dumper.exe main.go
+      run: |
+        mkdir -p dist # Создаем директорию dist на случай, если ее нет
+        go build -ldflags="-s -w" -o dist/dumper.exe main.go
 
     - name: Upload Artifact (.EXE)
       uses: actions/upload-artifact@v4
       with:
         name: NeverTime-RP-Dumper-Windows
         path: dist/dumper.exe
+        if-no-files-found: error # Выдаст ошибку в логах, если exe не скомпилировался
