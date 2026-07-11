@@ -215,7 +215,6 @@ func (d *Dumper) tryConnect(ver string) (*minecraft.Conn, error) {
 }
 
 func (d *Dumper) Run(version string) error {
-	// Подключаемся с повторами, используя точную версию
 	conn, err := d.connectWithRetry(version, 5)
 	if err != nil {
 		return err
@@ -224,12 +223,8 @@ func (d *Dumper) Run(version string) error {
 
 	logMsg("\x1b[1;32m✅ Соединение установлено! Запрашиваем ресурс-паки...\x1b[0m")
 
-	// Ожидаем получение ResourcePacksInfo, давая время на передачу пакетов
-	select {
-	case <-conn.Closed():   // исправлено: Closed() возвращает канал
-		return fmt.Errorf("соединение закрыто сервером до получения паков")
-	case <-time.After(10 * time.Second):
-	}
+	// Даём серверу время отправить ResourcePacksInfo
+	time.Sleep(5 * time.Second)
 
 	packs := conn.ResourcePacks()
 	if len(packs) == 0 {
