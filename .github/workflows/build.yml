@@ -18,16 +18,13 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        # Строка cache: 'pip' удалена, чтобы избежать ошибки поиска requirements.txt
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install keyboard pyinstaller
+        pip install keyboard customtkinter pyinstaller
 
     - name: Compile to EXE
-      # --onefile собирает все в один .exe
-      # --windowed убирает черное консольное окно на фоне
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "SpeedAutoClicker" main.py
 
