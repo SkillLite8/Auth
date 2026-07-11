@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/auth"
-	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"golang.org/x/oauth2"
 )
@@ -52,7 +51,6 @@ func splitHostPort(input string) (string, int) {
 	return parts[0], port
 }
 
-// Dumper – основной тип
 type Dumper struct {
 	host        string
 	port        int
@@ -65,18 +63,14 @@ func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
 }
 
 func (d *Dumper) Run() error {
-	// Подключаемся
 	if err := d.connect(); err != nil {
 		return err
 	}
 	defer d.conn.Close()
 
 	logMsg("\x1b[1;32m✅ Подключено к серверу!\x1b[0m")
-
-	// Ждём немного, чтобы сервер отправил ресурс-паки
 	time.Sleep(3 * time.Second)
 
-	// Получаем список ресурс-паков
 	packs := d.conn.ResourcePacks()
 	if len(packs) == 0 {
 		logMsg("\x1b[1;33m⚠️ Сервер не предоставил ресурс-паки.\x1b[0m")
@@ -85,14 +79,11 @@ func (d *Dumper) Run() error {
 
 	logMsg(fmt.Sprintf("\x1b[1;36m📦 Найдено %d ресурс-паков\x1b[0m", len(packs)))
 
-	// Скачиваем каждый пак
 	for i, pack := range packs {
 		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание: %s\x1b[0m",
 			i+1, len(packs), pack.UUID().String()))
-
 		if err := d.downloadPack(pack); err != nil {
 			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка: %v\x1b[0m", err))
-			continue
 		}
 	}
 
@@ -100,29 +91,27 @@ func (d *Dumper) Run() error {
 	return nil
 }
 
-// connect – устанавливает соединение с сервером
 func (d *Dumper) connect() error {
-	// Минимальный ClientData, который точно есть в вашей версии
 	clientData := login.ClientData{
-		DeviceOS:       7,
-		DeviceModel:    "Windows 10",
-		DeviceID:       login.DeviceID(uuid.New().String()),
-		ClientRandomID: time.Now().UnixNano(),
-		GameVersion:    gameVersion,
-		ServerAddress:  fmt.Sprintf("%s:%d", d.host, d.port),
-		SkinID:         "Default",
-		SkinData:       "",
-		SkinImageWidth: 0,
-		SkinImageHeight: 0,
-		SkinResourcePatch: "",
-		SkinGeometry:   "",
+		DeviceOS:            7,
+		DeviceModel:         "Windows 10",
+		DeviceID:            login.DeviceID(uuid.New().String()),
+		ClientRandomID:      time.Now().UnixNano(),
+		GameVersion:         gameVersion,
+		ServerAddress:       fmt.Sprintf("%s:%d", d.host, d.port),
+		SkinID:              "Default",
+		SkinData:            "",
+		SkinImageWidth:      0,
+		SkinImageHeight:     0,
+		SkinResourcePatch:   "",
+		SkinGeometry:        "",
 		SkinGeometryVersion: "",
-		SkinAnimationData: "",
-		CapeData:       "",
-		CapeImageWidth: 0,
-		CapeImageHeight: 0,
-		TrustedSkin:    true,
-		LanguageCode:   "ru_RU",
+		SkinAnimationData:   "",
+		CapeData:            "",
+		CapeImageWidth:      0,
+		CapeImageHeight:     0,
+		TrustedSkin:         true,
+		LanguageCode:        "ru_RU",
 	}
 
 	dialer := minecraft.Dialer{
@@ -139,9 +128,7 @@ func (d *Dumper) connect() error {
 	return nil
 }
 
-// downloadPack – скачивает один ресурс-пак через Reader
 func (d *Dumper) downloadPack(pack interface{}) error {
-	// В старых версиях тип pack – *resource.Pack, у него есть методы UUID() и Reader()
 	type Pack interface {
 		UUID() uuid.UUID
 		Reader() io.ReadCloser
@@ -162,11 +149,9 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	}
 	defer f.Close()
 
-	// Копируем данные с прогрессом (каждые 5%)
 	buf := make([]byte, 1024*1024)
 	var written int64
 	lastPercent := -1
-	total := int64(0) // размер не известен, но можно попробовать получить через методы, если есть
 
 	for {
 		n, err := rc.Read(buf)
@@ -176,7 +161,6 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 				return werr
 			}
 			written += int64(n)
-			// Выводим прогресс каждые ~5 МБ
 			if written/1024/1024 > int64(lastPercent+1) {
 				percent := int(written / 1024 / 1024)
 				if percent%5 == 0 {
@@ -184,7 +168,6 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 					lastPercent = percent
 				}
 			}
-			// Имитация задержки
 			time.Sleep(randDelay(5, 20))
 		}
 		if err != nil {
@@ -212,9 +195,6 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// ===========================
-//  CLI ИНТЕРФЕЙС
-// ===========================
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
@@ -243,7 +223,8 @@ func main() {
 	if strings.TrimSpace(strings.ToLower(useXbox)) == "y" {
 		logMsg("\x1b[1;33m⏳ Откройте ссылку в браузере и введите код.\x1b[0m")
 		var err error
-		tokenSrc, err = auth.RequestLiveToken()
+		// Используем RequestLiveRefreshToken, которая возвращает TokenSource
+		tokenSrc, err = auth.RequestLiveRefreshToken()
 		if err != nil {
 			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
 			return
