@@ -69,8 +69,7 @@ func (d *Dumper) Run() error {
 	defer d.conn.Close()
 
 	logMsg("\x1b[1;32m✅ Подключено к серверу!\x1b[0m")
-	time.Sleep(3 * time.Second)
-
+	// Не нужна пауза – сразу проверяем паки
 	packs := d.conn.ResourcePacks()
 	if len(packs) == 0 {
 		logMsg("\x1b[1;33m⚠️ Сервер не предоставил ресурс-паки.\x1b[0m")
@@ -145,54 +144,39 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	outPath := filepath.Join(outputDir, p.UUID().String()+".zip")
 	f, err := os.Create(outPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("создание файла: %w", err)
 	}
 	defer f.Close()
 
-	buf := make([]byte, 1024*1024)
+	buf := make([]byte, 1024*1024) // 1 MB буфер
 	var written int64
-	lastPercent := -1
+	lastMB := int64(-1) // для отслеживания прогресса по мегабайтам
 
 	for {
-		n, err := rc.Read(buf)
+		n, readErr := rc.Read(buf)
 		if n > 0 {
-			_, werr := f.Write(buf[:n])
-			if werr != nil {
-				return werr
+			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
+				return fmt.Errorf("запись в файл: %w", writeErr)
 			}
 			written += int64(n)
-			if written/1024/1024 > int64(lastPercent+1) {
-				percent := int(written / 1024 / 1024)
-				if percent%5 == 0 {
-					logMsg(fmt.Sprintf("\x1b[2m   ⏳ %s\x1b[0m", formatFileSize(written)))
-					lastPercent = percent
-				}
+			// Показываем прогресс каждый новый мегабайт
+			currentMB := written / (1024 * 1024)
+			if currentMB > lastMB {
+				logMsg(fmt.Sprintf("   ⏳ Загружено: %d MB", currentMB))
+				lastMB = currentMB
 			}
-			time.Sleep(randDelay(5, 20))
 		}
-		if err != nil {
-			if err == io.EOF {
+		if readErr != nil {
+			if readErr == io.EOF {
 				break
 			}
-			return err
+			return fmt.Errorf("чтение данных: %w", readErr)
 		}
 	}
 
-	logMsg(fmt.Sprintf("\x1b[1;32m✅ Сохранён: %s (%.2f MB)\x1b[0m", filepath.Base(outPath), float64(written)/1024/1024))
+	sizeMB := float64(written) / (1024 * 1024)
+	logMsg(fmt.Sprintf("\x1b[1;32m✅ Сохранён: %s (%.2f MB)\x1b[0m", filepath.Base(outPath), sizeMB))
 	return nil
-}
-
-func formatFileSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func main() {
@@ -212,27 +196,19 @@ func main() {
 		return
 	}
 
-	fmt.Print("IP:Порт сервера (например mc.nevertime.su:19132): ")
+	fmt.Print("IP:Порт сервера (например clawpe.fun:19132): ")
 	input, _ := reader.ReadString('\n')
 	host, port := splitHostPort(strings.TrimSpace(input))
 
-	fmt.Print("Использовать Xbox Auth? (y/n): ")
-	useXbox, _ := reader.ReadString('\n')
-	var tokenSrc oauth2.TokenSource
-
-	if strings.TrimSpace(strings.ToLower(useXbox)) == "y" {
-		logMsg("\x1b[1;33m⏳ Откройте ссылку в браузере и введите код.\x1b[0m")
-		token, err := auth.RequestLiveToken()
-		if err != nil {
-			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
-			return
-		}
-		// Простой способ: StaticTokenSource – токен уже содержит refresh, но для короткой сессии подойдёт
-		tokenSrc = oauth2.StaticTokenSource(token)
-		logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
-	} else {
-		tokenSrc = nil
+	// Принудительная Xbox-авторизация
+	logMsg("\x1b[1;33m⏳ Необходима авторизация Xbox Live.\x1b[0m")
+	token, err := auth.RequestLiveToken()
+	if err != nil {
+		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
+		return
 	}
+	tokenSrc := oauth2.StaticTokenSource(token)
+	logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
 
 	dumper := NewDumper(host, port, tokenSrc)
 	if err := dumper.Run(); err != nil {
