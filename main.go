@@ -22,7 +22,7 @@ import (
 const (
 	outputDir   = "./resource_packs"
 	logFile     = "rp_dumper.log"
-	// Устанавливаем актуальную внутреннюю версию протокола 2026 года
+	// Устанавливаем актуальную внутреннюю версию протокола сервера 26.20
 	gameVersion = "1.26.20" 
 )
 
@@ -60,24 +60,23 @@ func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
 }
 
 func (d *Dumper) Run() error {
-	// Инициализируем симуляцию клиента Windows 11/Xbox
+	// Инициализируем симуляцию легитимного клиента Windows 11 / Xbox
 	clientData := login.ClientData{
-		DeviceOS:             7, // Windows 10/11
-		DeviceModel:          "Custom PC (Ryzen 7, RTX 4060)",
-		DeviceID:             login.DeviceID(uuid.New().String()),
-		ClientRandomID:       time.Now().UnixNano(),
-		GameVersion:          gameVersion,
-		ServerAddress:        fmt.Sprintf("%s:%d", d.host, d.port),
-		SkinID:               "GeometryCustomSkin",
-		TrustedSkin:          true,
-		LanguageCode:         "ru_RU",
-		CurrentInputMode:     1, // Клавиатура + Мышь
-		DefaultInputMode:     1,
-		CompatibleWithClient: true,
-		PlatformOnlineID:     uuid.New().String(),
-		PlatformOfflineID:    uuid.New().String(),
-		PremiumSkin:          true,
-		PersonaSkin:          false,
+		DeviceOS:          7, // Windows 10/11
+		DeviceModel:       "Custom PC (Ryzen 7, RTX 4060)",
+		DeviceID:          login.DeviceID(uuid.New().String()),
+		ClientRandomID:    time.Now().UnixNano(),
+		GameVersion:       gameVersion,
+		ServerAddress:     fmt.Sprintf("%s:%d", d.host, d.port),
+		SkinID:            "GeometryCustomSkin",
+		TrustedSkin:       true,
+		LanguageCode:      "ru_RU",
+		CurrentInputMode:  1, // Клавиатура + Мышь
+		DefaultInputMode:  1,
+		PlatformOnlineID:  uuid.New().String(),
+		PlatformOfflineID: uuid.New().String(),
+		PremiumSkin:       true,
+		PersonaSkin:       false,
 	}
 
 	dialer := minecraft.Dialer{
@@ -88,7 +87,7 @@ func (d *Dumper) Run() error {
 	addr := fmt.Sprintf("%s:%d", d.host, d.port)
 	logMsg(fmt.Sprintf("🚀 Запуск симуляции игрока. Подключение к %s...", addr))
 
-	// Увеличиваем таймаут до 45 секунд, чтобы нивелировать задержки VPN/прокси
+	// Увеличиваем таймаут ожидания пакетов до 45 секунд под прокси/VPN соединения
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
@@ -101,7 +100,7 @@ func (d *Dumper) Run() error {
 
 	logMsg("\x1b[1;32m✅ Успешное вхождение в сеть сервера. Эмуляция завершена.\x1b[0m")
 	
-	// Небольшое ожидание для завершения хэндшейка со стороны ядра
+	// Ожидание завершения внутреннего хэндшейка со стороны ядра
 	time.Sleep(2 * time.Second)
 
 	packs := d.conn.ResourcePacks()
@@ -134,7 +133,7 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 
 	rc := p.Reader()
 	if rc == nil {
-		return fmt.Errorf("пустой поток данных (заблокировано ядром)")
+		return fmt.Errorf("пустой поток данных (заблокировано ядром сервера)")
 	}
 	defer rc.Close()
 
@@ -174,7 +173,7 @@ func main() {
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
 
 	logMsg("\x1b[1;35m╔══════════════════════════════════════════════════════╗\x1b[0m")
-	logMsg("\x1b[1;35m║     🛸  NeverTime Client Emulator v11.0 (Go)       ║\x1b[0m")
+	logMsg("\x1b[1;35m║     🛸  NeverTime Client Emulator v11.1 (Go)       ║\x1b[0m")
 	logMsg("\x1b[1;35m╚══════════════════════════════════════════════════════╝\x1b[0m")
 
 	reader := bufio.NewReader(os.Stdin)
