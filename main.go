@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -55,22 +54,14 @@ func pingServer(address string, port int) (version string, motd string, err erro
 	}
 	defer conn.Close()
 
-	// Unconnected Ping для Bedrock (Minecraft RakNet)
 	pingID := byte(0x01)
 	timeNow := time.Now().UnixMilli()
 	clientID := randInt63()
-	packet := []byte{
-		0x01,                               // packet ID
-		pingID,                             // ping ID
-		byte(timeNow >> 56), byte(timeNow >> 48), byte(timeNow >> 40), byte(timeNow >> 32),
-		byte(timeNow >> 24), byte(timeNow >> 16), byte(timeNow >> 8), byte(timeNow),
-		0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78,
-	}
-	// Заголовок магических байт для оффлайн-сообщений
-	magic := []byte{0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78}
-	_ = magic
 
-	// Формируем буфер: байт ID, ping ID, 8 байт времени, 16 байт magic, 8 байт client ID
+	// Магическая последовательность для Bedrock Unconnected Ping
+	magic := []byte{0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78}
+
+	// Формируем буфер: ID, ping ID, 8 байт времени, 16 байт magic, 8 байт client ID
 	buf := make([]byte, 1+8+16+8)
 	buf[0] = 0x01
 	buf[1] = pingID
@@ -104,22 +95,13 @@ func pingServer(address string, port int) (version string, motd string, err erro
 		return "", "", err
 	}
 
-	// Парсим Unconnected Pong: ID = 0x1c, затем ping ID, 8 байт server ID, 2 байта длина MOTD
-	if n < 3 || resp[0] != 0x1c {
+	// Парсим Unconnected Pong: ID = 0x1c
+	if n < 12 || resp[0] != 0x1c {
 		return "", "", fmt.Errorf("неверный ответ пинга")
 	}
 	if resp[1] != pingID {
 		return "", "", fmt.Errorf("пинг ID не совпал")
 	}
-	serverID := int64(0)
-	serverID |= int64(resp[2]) << 56
-	serverID |= int64(resp[3]) << 48
-	serverID |= int64(resp[4]) << 40
-	serverID |= int64(resp[5]) << 32
-	serverID |= int64(resp[6]) << 24
-	serverID |= int64(resp[7]) << 16
-	serverID |= int64(resp[8]) << 8
-	serverID |= int64(resp[9])
 	motdLen := int(resp[10])<<8 | int(resp[11])
 	motdStart := 12
 	if motdStart+motdLen > n {
@@ -127,7 +109,7 @@ func pingServer(address string, port int) (version string, motd string, err erro
 	}
 	motd = string(resp[motdStart : motdStart+motdLen])
 
-	// Ищем версию в MOTD (обычно вида "Minecraft Bedrock 1.20.30" или "version 1.20.30")
+	// Ищем версию в MOTD (обычно "Minecraft Bedrock 1.20.30")
 	verRegex := regexp.MustCompile(`(\d+\.\d+\.\d+)`)
 	match := verRegex.FindStringSubmatch(motd)
 	if len(match) > 0 {
@@ -242,12 +224,11 @@ func (d *Dumper) Run(version string) error {
 
 	logMsg("\x1b[1;32m✅ Соединение установлено! Запрашиваем ресурс-паки...\x1b[0m")
 
-	// Ожидаем полную синхронизацию мира, чтобы сервер прислал ResourcePacksInfo
+	// Ожидаем получение ResourcePacksInfo, давая время на передачу пакетов
 	select {
-	case <-conn.Closing():
+	case <-conn.Closed():   // исправлено: Closed() возвращает канал
 		return fmt.Errorf("соединение закрыто сервером до получения паков")
 	case <-time.After(10 * time.Second):
-		// даём время на передачу пакетов
 	}
 
 	packs := conn.ResourcePacks()
@@ -324,7 +305,7 @@ func main() {
 	if err != nil {
 		logMsg(fmt.Sprintf("❌ Пинг не удался: %v", err))
 		logMsg("Будет использован ручной перебор версий.")
-		version = "" // оставляем пустой, чтобы применить список
+		version = ""
 	} else {
 		logMsg(fmt.Sprintf("✅ Сервер ответил: %s (версия %s)", motd, version))
 	}
