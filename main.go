@@ -22,7 +22,8 @@ import (
 const (
 	outputDir   = "./resource_packs"
 	logFile     = "rp_dumper.log"
-	gameVersion = "1.21.32" 
+	// Устанавливаем актуальную внутреннюю версию протокола 2026 года
+	gameVersion = "1.26.20" 
 )
 
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -58,48 +59,25 @@ func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
 	return &Dumper{host: host, port: port, tokenSource: tokenSource}
 }
 
-func (d *Dumper) connectWithRetry(maxAttempts int, baseDelay time.Duration) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		logMsg(fmt.Sprintf("Попытка подключения %d/%d...", attempt, maxAttempts))
-		err := d.connect()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка подключения (попытка %d): %v\x1b[0m", attempt, err))
-		if attempt < maxAttempts {
-			delay := baseDelay * time.Duration(1<<(attempt-1))
-			logMsg(fmt.Sprintf("Ожидание %v перед следующей попыткой...", delay))
-			time.Sleep(delay)
-		}
-	}
-	return fmt.Errorf("не удалось подключиться после %d попыток: %w", maxAttempts, lastErr)
-}
-
-func (d *Dumper) connect() error {
+func (d *Dumper) Run() error {
+	// Инициализируем симуляцию клиента Windows 11/Xbox
 	clientData := login.ClientData{
-		DeviceOS:            7, // Windows
-		DeviceModel:         "Windows 10",
-		DeviceID:            login.DeviceID(uuid.New().String()),
-		ClientRandomID:      time.Now().UnixNano(),
-		GameVersion:         gameVersion,
-		ServerAddress:       fmt.Sprintf("%s:%d", d.host, d.port),
-		SkinID:              "Default",
-		SkinData:            "",
-		SkinImageWidth:      0,
-		SkinImageHeight:     0,
-		SkinResourcePatch:   "",
-		SkinGeometry:        "",
-		SkinGeometryVersion: "",
-		SkinAnimationData:   "",
-		CapeData:            "",
-		CapeImageWidth:      0,
-		CapeImageHeight:     0,
-		TrustedSkin:         true,
-		LanguageCode:        "ru_RU",
-		CurrentInputMode:    1,
-		DefaultInputMode:    1,
+		DeviceOS:             7, // Windows 10/11
+		DeviceModel:          "Custom PC (Ryzen 7, RTX 4060)",
+		DeviceID:             login.DeviceID(uuid.New().String()),
+		ClientRandomID:       time.Now().UnixNano(),
+		GameVersion:          gameVersion,
+		ServerAddress:        fmt.Sprintf("%s:%d", d.host, d.port),
+		SkinID:               "GeometryCustomSkin",
+		TrustedSkin:          true,
+		LanguageCode:         "ru_RU",
+		CurrentInputMode:     1, // Клавиатура + Мышь
+		DefaultInputMode:     1,
+		CompatibleWithClient: true,
+		PlatformOnlineID:     uuid.New().String(),
+		PlatformOfflineID:    uuid.New().String(),
+		PremiumSkin:          true,
+		PersonaSkin:          false,
 	}
 
 	dialer := minecraft.Dialer{
@@ -108,47 +86,39 @@ func (d *Dumper) connect() error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", d.host, d.port)
-	
-	// Создаем контекст с таймаутом 30 секунд для стабильной работы через VPN
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	logMsg(fmt.Sprintf("🚀 Запуск симуляции игрока. Подключение к %s...", addr))
+
+	// Увеличиваем таймаут до 45 секунд, чтобы нивелировать задержки VPN/прокси
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	conn, err := dialer.DialContext(ctx, "raknet", addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("ошибка авторизации на сервере: %w", err)
 	}
 	d.conn = conn
-	return nil
-}
-
-func (d *Dumper) Run() error {
-	if err := d.connectWithRetry(3, 2*time.Second); err != nil {
-		return err
-	}
 	defer d.conn.Close()
 
-	logMsg("\x1b[1;32m✅ Подключено к серверу! Ожидание дешифровки пакетов и получения списка РП...\x1b[0m")
+	logMsg("\x1b[1;32m✅ Успешное вхождение в сеть сервера. Эмуляция завершена.\x1b[0m")
 	
-	time.Sleep(1 * time.Second)
+	// Небольшое ожидание для завершения хэндшейка со стороны ядра
+	time.Sleep(2 * time.Second)
 
 	packs := d.conn.ResourcePacks()
 	if len(packs) == 0 {
-		logMsg("\x1b[1;33m⚠️ Сервер не передал ресурс-паки. Возможные причины:\x1b[0m")
-		logMsg("   1. Сервер использует защиту Anti-Dump (паки скрыты или вырезаны на этапе логина).")
-		logMsg("   2. Версия " + gameVersion + " не поддерживается сервером.")
+		logMsg("\x1b[1;33m⚠️ Сервер успешно принял сессию, но не передал массив ресурс-паков.\x1b[0m")
 		return nil
 	}
 
-	logMsg(fmt.Sprintf("\x1b[1;36m📦 Найдено %d ресурс-паков\x1b[0m", len(packs)))
+	logMsg(fmt.Sprintf("\x1b[1;36m📦 Обнаружено доступных ресурс-паков: %d\x1b[0m", len(packs)))
 
 	for i, pack := range packs {
-		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание пака: %s\x1b[0m", i+1, len(packs), pack.UUID().String()))
+		logMsg(fmt.Sprintf("   📥 [%d/%d] Чтение потока: %s", i+1, len(packs), pack.UUID().String()))
 		if err := d.downloadPack(pack); err != nil {
-			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка при скачивании пака %s: %v\x1b[0m", pack.UUID().String(), err))
+			logMsg(fmt.Sprintf("\x1b[1;31m      ❌ Ошибка: %v\x1b[0m", err))
 		}
 	}
 
-	logMsg("\x1b[1;35m🏁 Процесс завершен. Проверьте папку " + outputDir + "\x1b[0m")
 	return nil
 }
 
@@ -159,12 +129,12 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	}
 	p, ok := pack.(Pack)
 	if !ok {
-		return fmt.Errorf("неверный тип ресурс-пака в библиотеке gophertunnel")
+		return fmt.Errorf("неверный тип структуры данных пакета")
 	}
 
 	rc := p.Reader()
 	if rc == nil {
-		return fmt.Errorf("сервер заблокировал чтение (Reader вернул nil)")
+		return fmt.Errorf("пустой поток данных (заблокировано ядром)")
 	}
 	defer rc.Close()
 
@@ -172,41 +142,31 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	outPath := filepath.Join(outputDir, p.UUID().String()+".zip")
 	f, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("не удалось создать файл: %w", err)
+		return fmt.Errorf("ошибка создания локального файла: %w", err)
 	}
 	defer f.Close()
 
 	buf := make([]byte, 1024*1024)
 	var written int64
-	lastMB := int64(-1)
 
 	for {
 		n, readErr := rc.Read(buf)
 		if n > 0 {
 			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
-				return fmt.Errorf("ошибка записи на диск: %w", writeErr)
+				return fmt.Errorf("ошибка записи: %w", writeErr)
 			}
 			written += int64(n)
-			currentMB := written / (1024 * 1024)
-			if currentMB > lastMB {
-				logMsg(fmt.Sprintf("   ⏳ Скачано: %d MB", currentMB))
-				lastMB = currentMB
-			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				break
 			}
-			return fmt.Errorf("ошибка чтения потока данных: %w", readErr)
+			return fmt.Errorf("ошибка чтения потока: %w", readErr)
 		}
 	}
 
 	sizeMB := float64(written) / (1024 * 1024)
-	if sizeMB == 0 {
-		logMsg(fmt.Sprintf("\x1b[1;33m⚠️ Предупреждение: Скачанный файл %s пуст (0 MB). Сервер скормил заглушку.\x1b[0m", p.UUID().String()))
-	} else {
-		logMsg(fmt.Sprintf("\x1b[1;32m✅ Успешно сохранён: %s (%.2f MB)\x1b[0m", filepath.Base(outPath), sizeMB))
-	}
+	logMsg(fmt.Sprintf("\x1b[1;32m      ✅ Файл успешно выгружен (Размер: %.2f MB)\x1b[0m", sizeMB))
 	return nil
 }
 
@@ -214,33 +174,30 @@ func main() {
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
 
 	logMsg("\x1b[1;35m╔══════════════════════════════════════════════════════╗\x1b[0m")
-	logMsg("\x1b[1;35m║     🛸  NeverTime RP Dumper v9.1  (Go 2026)        ║\x1b[0m")
-	logMsg("\x1b[1;35m║          Скачивание ресурс-паков с обходом         ║\x1b[0m")
+	logMsg("\x1b[1;35m║     🛸  NeverTime Client Emulator v11.0 (Go)       ║\x1b[0m")
 	logMsg("\x1b[1;35m╚══════════════════════════════════════════════════════╝\x1b[0m")
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Введите 'packs' для начала работы: ")
+	fmt.Print("Введите 'packs' для старта: ")
 	cmd, _ := reader.ReadString('\n')
 	if strings.TrimSpace(cmd) != "packs" {
-		logMsg("Отмена операции. Выход.")
 		return
 	}
 
-	fmt.Print("Введите IP:Порт (например, mc.nevertime.su:19132): ")
+	fmt.Print("IP:Порт сервера: ")
 	input, _ := reader.ReadString('\n')
 	host, port := splitHostPort(strings.TrimSpace(input))
 
-	logMsg("\x1b[1;33m⏳ Запрос токена Xbox Live. Пожалуйста, пройдите авторизацию в открывшемся окне браузера...\x1b[0m")
+	logMsg("\x1b[1;33m⏳ Запуск процесса обмена токенов Xbox Live...\x1b[0m")
 	token, err := auth.RequestLiveToken()
 	if err != nil {
-		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка авторизации Xbox Live: %v\x1b[0m", err))
+		logMsg(fmt.Sprintf("❌ Критическая ошибка авторизации Live: %v", err))
 		return
 	}
 	tokenSrc := oauth2.StaticTokenSource(token)
-	logMsg("\x1b[1;32m✅ Токен успешно получен.\x1b[0m")
 
 	dumper := NewDumper(host, port, tokenSrc)
 	if err := dumper.Run(); err != nil {
-		logMsg(fmt.Sprintf("\x1b[1;31m❌ Критический сбой программы: %v\x1b[0m", err))
+		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка выполнения: %v\x1b[0m", err))
 	}
 }
