@@ -17,13 +17,9 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/auth"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
-	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"golang.org/x/oauth2"
 )
 
-// ===========================
-//  КОНФИГУРАЦИЯ
-// ===========================
 const (
 	outputDir   = "./resource_packs"
 	logFile     = "rp_dumper.log"
@@ -32,9 +28,6 @@ const (
 
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-// ===========================
-//  ЛОГГЕР
-// ===========================
 func logMsg(msg string) {
 	fmt.Println(msg)
 	clean := ansiRegex.ReplaceAllString(msg, "")
@@ -46,9 +39,6 @@ func logMsg(msg string) {
 	}
 }
 
-// ===========================
-//  УТИЛИТЫ
-// ===========================
 func randDelay(minMs, maxMs int) time.Duration {
 	return time.Duration(rand.Intn(maxMs-minMs+1)+minMs) * time.Millisecond
 }
@@ -62,27 +52,20 @@ func splitHostPort(input string) (string, int) {
 	return parts[0], port
 }
 
-// ===========================
-//  ОСНОВНОЙ ТИП – ДАМПЕР
-// ===========================
+// Dumper – основной тип
 type Dumper struct {
 	host        string
 	port        int
 	tokenSource oauth2.TokenSource
 	conn        *minecraft.Conn
-	done        chan bool
 }
 
 func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
-	return &Dumper{
-		host:        host,
-		port:        port,
-		tokenSource: tokenSource,
-		done:        make(chan bool),
-	}
+	return &Dumper{host: host, port: port, tokenSource: tokenSource}
 }
 
 func (d *Dumper) Run() error {
+	// Подключаемся
 	if err := d.connect(); err != nil {
 		return err
 	}
@@ -90,31 +73,25 @@ func (d *Dumper) Run() error {
 
 	logMsg("\x1b[1;32m✅ Подключено к серверу!\x1b[0m")
 
-	// Запускаем anti-AFK в фоне
-	go d.antiAFK()
-
-	// Ожидаем получения списка ресурс-паков (сервер пришлёт их автоматически)
+	// Ждём немного, чтобы сервер отправил ресурс-паки
 	time.Sleep(3 * time.Second)
 
+	// Получаем список ресурс-паков
 	packs := d.conn.ResourcePacks()
 	if len(packs) == 0 {
-		logMsg("\x1b[1;33m⚠️ Сервер не предоставил ресурс-паки. Возможно, требуется дополнительная авторизация.\x1b[0m")
+		logMsg("\x1b[1;33m⚠️ Сервер не предоставил ресурс-паки.\x1b[0m")
 		return nil
 	}
 
 	logMsg(fmt.Sprintf("\x1b[1;36m📦 Найдено %d ресурс-паков\x1b[0m", len(packs)))
 
+	// Скачиваем каждый пак
 	for i, pack := range packs {
-		// Получаем размер через Header()
-		var size int64
-		if h := pack.Header(); h != nil {
-			size = int64(h.Size)
-		}
-		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание: %s (%.2f MB)\x1b[0m",
-			i+1, len(packs), pack.UUID().String(), float64(size)/1024/1024))
+		logMsg(fmt.Sprintf("\x1b[1;34m[%d/%d] Скачивание: %s\x1b[0m",
+			i+1, len(packs), pack.UUID().String()))
 
 		if err := d.downloadPack(pack); err != nil {
-			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка скачивания: %v\x1b[0m", err))
+			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка: %v\x1b[0m", err))
 			continue
 		}
 	}
@@ -123,19 +100,17 @@ func (d *Dumper) Run() error {
 	return nil
 }
 
-// ===========================
-//  ПОДКЛЮЧЕНИЕ
-// ===========================
+// connect – устанавливает соединение с сервером
 func (d *Dumper) connect() error {
-	// Только проверенные поля ClientData (убираем несуществующие)
+	// Минимальный ClientData, который точно есть в вашей версии
 	clientData := login.ClientData{
 		DeviceOS:       7,
-		DeviceModel:    "System Product Name (ASUS)",
+		DeviceModel:    "Windows 10",
 		DeviceID:       login.DeviceID(uuid.New().String()),
 		ClientRandomID: time.Now().UnixNano(),
 		GameVersion:    gameVersion,
 		ServerAddress:  fmt.Sprintf("%s:%d", d.host, d.port),
-		SkinID:         "Geometry_CustomSkin",
+		SkinID:         "Default",
 		SkinData:       "",
 		SkinImageWidth: 0,
 		SkinImageHeight: 0,
@@ -148,19 +123,11 @@ func (d *Dumper) connect() error {
 		CapeImageHeight: 0,
 		TrustedSkin:    true,
 		LanguageCode:   "ru_RU",
-		UIProfile:      0,
-		CurrentInputMode: 1,
-		DefaultInputMode: 1,
-		// Поля DeviceMemory, DeviceStorage и т.д. удалены, так как их нет в вашей версии
 	}
 
 	dialer := minecraft.Dialer{
-		ClientData:   clientData,
-		TokenSource:  d.tokenSource,
-		KeepAlive:    30 * time.Second,
-		DialTimeout:  15 * time.Second,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		ClientData:  clientData,
+		TokenSource: d.tokenSource,
 	}
 
 	addr := fmt.Sprintf("%s:%d", d.host, d.port)
@@ -172,17 +139,12 @@ func (d *Dumper) connect() error {
 	return nil
 }
 
-// ===========================
-//  СКАЧИВАНИЕ ПАКА (адаптировано)
-// ===========================
+// downloadPack – скачивает один ресурс-пак через Reader
 func (d *Dumper) downloadPack(pack interface{}) error {
-	// Приводим к типу, который имеет метод UUID() и Reader()
-	// В старых версиях это *resource.Pack, но мы используем интерфейс
-	// Для совместимости используем type assertion к известному типу
+	// В старых версиях тип pack – *resource.Pack, у него есть методы UUID() и Reader()
 	type Pack interface {
 		UUID() uuid.UUID
 		Reader() io.ReadCloser
-		Header() *protocol.ResourcePackHeader
 	}
 	p, ok := pack.(Pack)
 	if !ok {
@@ -192,7 +154,6 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	rc := p.Reader()
 	defer rc.Close()
 
-	// Создаём файл
 	_ = os.MkdirAll(outputDir, os.ModePerm)
 	outPath := filepath.Join(outputDir, p.UUID().String()+".zip")
 	f, err := os.Create(outPath)
@@ -201,15 +162,11 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	}
 	defer f.Close()
 
-	// Размер для прогресса
-	var total int64
-	if h := p.Header(); h != nil {
-		total = int64(h.Size)
-	}
-
-	var written int64
+	// Копируем данные с прогрессом (каждые 5%)
 	buf := make([]byte, 1024*1024)
+	var written int64
 	lastPercent := -1
+	total := int64(0) // размер не известен, но можно попробовать получить через методы, если есть
 
 	for {
 		n, err := rc.Read(buf)
@@ -219,14 +176,15 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 				return werr
 			}
 			written += int64(n)
-			if total > 0 {
-				percent := int((written * 100) / total)
-				if percent != lastPercent && percent%5 == 0 {
-					logMsg(fmt.Sprintf("\x1b[2m   ⏳ %s (%d%%)\x1b[0m", formatFileSize(written), percent))
+			// Выводим прогресс каждые ~5 МБ
+			if written/1024/1024 > int64(lastPercent+1) {
+				percent := int(written / 1024 / 1024)
+				if percent%5 == 0 {
+					logMsg(fmt.Sprintf("\x1b[2m   ⏳ %s\x1b[0m", formatFileSize(written)))
 					lastPercent = percent
 				}
 			}
-			// Небольшая задержка
+			// Имитация задержки
 			time.Sleep(randDelay(5, 20))
 		}
 		if err != nil {
@@ -255,54 +213,7 @@ func formatFileSize(bytes int64) string {
 }
 
 // ===========================
-//  ANTI-AFK
-// ===========================
-func (d *Dumper) antiAFK() {
-	ticker := time.NewTicker(8 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if d.conn == nil {
-				return
-			}
-			yaw := rand.Float32()*360 - 180
-			pitch := rand.Float32()*30 - 15
-			pos := d.conn.GameData().PlayerPosition
-			newPos := protocol.Position{
-				X: pos.X + (rand.Float32()-0.5)*0.5,
-				Y: pos.Y + (rand.Float32()-0.5)*0.3,
-				Z: pos.Z + (rand.Float32()-0.5)*0.5,
-			}
-			pk := &packet.MovePlayer{
-				EntityID:   d.conn.EntityID(),
-				Position:   newPos,
-				Pitch:      pitch,
-				Yaw:        yaw,
-				HeadYaw:    yaw,
-				Mode:       packet.MovePlayerModeNormal,
-				OnGround:   true,
-				TeleportID: 0,
-			}
-			if err := d.conn.WritePacket(pk); err != nil {
-				return
-			}
-			if rand.Intn(20) == 0 {
-				jump := &packet.PlayerAction{
-					EntityID: d.conn.EntityID(),
-					Action:   packet.PlayerActionJump,
-				}
-				_ = d.conn.WritePacket(jump)
-			}
-		case <-d.done:
-			return
-		}
-	}
-}
-
-// ===========================
-//  CLI
+//  CLI ИНТЕРФЕЙС
 // ===========================
 func main() {
 	rand.Seed(time.Now().UnixNano())
