@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +22,6 @@ import (
 const (
 	outputDir   = "./resource_packs"
 	logFile     = "rp_dumper.log"
-	// Актуализированная версия для обхода блокировок по версии (например, 1.21.32)
 	gameVersion = "1.21.32" 
 )
 
@@ -58,7 +58,6 @@ func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
 	return &Dumper{host: host, port: port, tokenSource: tokenSource}
 }
 
-// connectWithRetry выполняет connect с несколькими попытками и экспоненциальной задержкой
 func (d *Dumper) connectWithRetry(maxAttempts int, baseDelay time.Duration) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -70,7 +69,7 @@ func (d *Dumper) connectWithRetry(maxAttempts int, baseDelay time.Duration) erro
 		lastErr = err
 		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка подключения (попытка %d): %v\x1b[0m", attempt, err))
 		if attempt < maxAttempts {
-			delay := baseDelay * time.Duration(1<<(attempt-1)) // 2s, 4s, 8s...
+			delay := baseDelay * time.Duration(1<<(attempt-1))
 			logMsg(fmt.Sprintf("Ожидание %v перед следующей попыткой...", delay))
 			time.Sleep(delay)
 		}
@@ -79,7 +78,6 @@ func (d *Dumper) connectWithRetry(maxAttempts int, baseDelay time.Duration) erro
 }
 
 func (d *Dumper) connect() error {
-	// Эмуляция официального клиента Windows 10/11 для обхода Anti-Cheat / Anti-Bot систем
 	clientData := login.ClientData{
 		DeviceOS:            7, // Windows
 		DeviceModel:         "Windows 10",
@@ -100,7 +98,7 @@ func (d *Dumper) connect() error {
 		CapeImageHeight:     0,
 		TrustedSkin:         true,
 		LanguageCode:        "ru_RU",
-		CurrentInputMode:    1, // Keyboard & Mouse
+		CurrentInputMode:    1,
 		DefaultInputMode:    1,
 	}
 
@@ -110,8 +108,12 @@ func (d *Dumper) connect() error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", d.host, d.port)
-	// Устанавливаем таймаут на подключение, чтобы скрипт не зависал бесконечно
-	conn, err := dialer.Dial("raknet", addr)
+	
+	// Создаем контекст с таймаутом 30 секунд для стабильной работы через VPN
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := dialer.DialContext(ctx, "raknet", addr)
 	if err != nil {
 		return err
 	}
@@ -127,14 +129,13 @@ func (d *Dumper) Run() error {
 
 	logMsg("\x1b[1;32m✅ Подключено к серверу! Ожидание дешифровки пакетов и получения списка РП...\x1b[0m")
 	
-	// Небольшая пауза, чтобы прокси-сервер успел прислать ResourcePacksInfo пакет
 	time.Sleep(1 * time.Second)
 
 	packs := d.conn.ResourcePacks()
 	if len(packs) == 0 {
 		logMsg("\x1b[1;33m⚠️ Сервер не передал ресурс-паки. Возможные причины:\x1b[0m")
 		logMsg("   1. Сервер использует защиту Anti-Dump (паки скрыты или вырезаны на этапе логина).")
-		logMsg("   2. Версия " + gameVersion + " не поддерживается сервером (попробуйте изменить константу gameVersion).")
+		logMsg("   2. Версия " + gameVersion + " не поддерживается сервером.")
 		return nil
 	}
 
@@ -163,7 +164,7 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 
 	rc := p.Reader()
 	if rc == nil {
-		return fmt.Errorf("сервер заблокировал чтение (Reader вернул nil). Возможно пак зашифрован")
+		return fmt.Errorf("сервер заблокировал чтение (Reader вернул nil)")
 	}
 	defer rc.Close()
 
@@ -175,7 +176,6 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 	}
 	defer f.Close()
 
-	// Оптимальный буфер в 1 МБ для быстрой записи больших текстур-паков
 	buf := make([]byte, 1024*1024)
 	var written int64
 	lastMB := int64(-1)
@@ -211,11 +211,10 @@ func (d *Dumper) downloadPack(pack interface{}) error {
 }
 
 func main() {
-	// Из соображений совместимости с Go 1.20+ rand.Seed удален, так как рантайм Go теперь делает это сам автоматически.
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
 
 	logMsg("\x1b[1;35m╔══════════════════════════════════════════════════════╗\x1b[0m")
-	logMsg("\x1b[1;35m║     🛸  NeverTime RP Dumper v9.0  (Go 2026)        ║\x1b[0m")
+	logMsg("\x1b[1;35m║     🛸  NeverTime RP Dumper v9.1  (Go 2026)        ║\x1b[0m")
 	logMsg("\x1b[1;35m║          Скачивание ресурс-паков с обходом         ║\x1b[0m")
 	logMsg("\x1b[1;35m╚══════════════════════════════════════════════════════╝\x1b[0m")
 
