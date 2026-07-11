@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,14 +21,20 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const (
-	outputDir   = "./resource_packs"
-	logFile     = "rp_dumper.log"
-	// Устанавливаем актуальную внутреннюю версию протокола сервера 26.20
-	gameVersion = "1.26.20" 
-)
-
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+var logFile string
+var baseDir string
+var outputDir = "resource_packs"
+
+func initPaths() {
+	exePath, err := os.Executable()
+	if err != nil {
+		baseDir = "."
+	} else {
+		baseDir = filepath.Dir(exePath)
+	}
+	logFile = filepath.Join(baseDir, "rp_dumper.log")
+}
 
 func logMsg(msg string) {
 	fmt.Println(msg)
@@ -38,6 +46,102 @@ func logMsg(msg string) {
 		f.WriteString(fmt.Sprintf("[%s] %s\n", timestamp, clean))
 	}
 }
+
+// ---- Ping для получения версии с сервера ----
+func pingServer(address string, port int) (version string, motd string, err error) {
+	conn, err := net.DialTimeout("udp", fmt.Sprintf("%s:%d", address, port), 5*time.Second)
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+
+	// Unconnected Ping для Bedrock (Minecraft RakNet)
+	pingID := byte(0x01)
+	timeNow := time.Now().UnixMilli()
+	clientID := randInt63()
+	packet := []byte{
+		0x01,                               // packet ID
+		pingID,                             // ping ID
+		byte(timeNow >> 56), byte(timeNow >> 48), byte(timeNow >> 40), byte(timeNow >> 32),
+		byte(timeNow >> 24), byte(timeNow >> 16), byte(timeNow >> 8), byte(timeNow),
+		0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78,
+	}
+	// Заголовок магических байт для оффлайн-сообщений
+	magic := []byte{0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78}
+	_ = magic
+
+	// Формируем буфер: байт ID, ping ID, 8 байт времени, 16 байт magic, 8 байт client ID
+	buf := make([]byte, 1+8+16+8)
+	buf[0] = 0x01
+	buf[1] = pingID
+	buf[2] = byte(timeNow >> 56)
+	buf[3] = byte(timeNow >> 48)
+	buf[4] = byte(timeNow >> 40)
+	buf[5] = byte(timeNow >> 32)
+	buf[6] = byte(timeNow >> 24)
+	buf[7] = byte(timeNow >> 16)
+	buf[8] = byte(timeNow >> 8)
+	buf[9] = byte(timeNow)
+	copy(buf[10:26], magic)
+	buf[26] = byte(clientID >> 56)
+	buf[27] = byte(clientID >> 48)
+	buf[28] = byte(clientID >> 40)
+	buf[29] = byte(clientID >> 32)
+	buf[30] = byte(clientID >> 24)
+	buf[31] = byte(clientID >> 16)
+	buf[32] = byte(clientID >> 8)
+	buf[33] = byte(clientID)
+
+	_, err = conn.Write(buf)
+	if err != nil {
+		return "", "", err
+	}
+
+	resp := make([]byte, 4096)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err := conn.Read(resp)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Парсим Unconnected Pong: ID = 0x1c, затем ping ID, 8 байт server ID, 2 байта длина MOTD
+	if n < 3 || resp[0] != 0x1c {
+		return "", "", fmt.Errorf("неверный ответ пинга")
+	}
+	if resp[1] != pingID {
+		return "", "", fmt.Errorf("пинг ID не совпал")
+	}
+	serverID := int64(0)
+	serverID |= int64(resp[2]) << 56
+	serverID |= int64(resp[3]) << 48
+	serverID |= int64(resp[4]) << 40
+	serverID |= int64(resp[5]) << 32
+	serverID |= int64(resp[6]) << 24
+	serverID |= int64(resp[7]) << 16
+	serverID |= int64(resp[8]) << 8
+	serverID |= int64(resp[9])
+	motdLen := int(resp[10])<<8 | int(resp[11])
+	motdStart := 12
+	if motdStart+motdLen > n {
+		return "", "", fmt.Errorf("некорректная длина MOTD")
+	}
+	motd = string(resp[motdStart : motdStart+motdLen])
+
+	// Ищем версию в MOTD (обычно вида "Minecraft Bedrock 1.20.30" или "version 1.20.30")
+	verRegex := regexp.MustCompile(`(\d+\.\d+\.\d+)`)
+	match := verRegex.FindStringSubmatch(motd)
+	if len(match) > 0 {
+		version = match[1]
+		return version, motd, nil
+	}
+	return "", motd, fmt.Errorf("версия не найдена в MOTD: %s", motd)
+}
+
+func randInt63() int64 {
+	return time.Now().UnixNano() ^ 0x5DEECE66D
+}
+
+// ---------------------------
 
 func splitHostPort(input string) (string, int) {
 	parts := strings.Split(input, ":")
@@ -52,31 +156,65 @@ type Dumper struct {
 	host        string
 	port        int
 	tokenSource oauth2.TokenSource
-	conn        *minecraft.Conn
 }
 
 func NewDumper(host string, port int, tokenSource oauth2.TokenSource) *Dumper {
 	return &Dumper{host: host, port: port, tokenSource: tokenSource}
 }
 
-func (d *Dumper) Run() error {
-	// Инициализируем симуляцию легитимного клиента Windows 11 / Xbox
+func (d *Dumper) connectWithRetry(version string, maxAttempts int) (*minecraft.Conn, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		logMsg(fmt.Sprintf("Попытка подключения %d/%d (версия %s)...", attempt, maxAttempts, version))
+		conn, err := d.tryConnect(version)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка: %v\x1b[0m", err))
+		if attempt < maxAttempts {
+			delay := time.Duration(2<<(attempt-1)) * time.Second
+			logMsg(fmt.Sprintf("Ожидание %v...", delay))
+			time.Sleep(delay)
+		}
+	}
+	return nil, fmt.Errorf("не удалось подключиться после %d попыток: %w", maxAttempts, lastErr)
+}
+
+func (d *Dumper) tryConnect(ver string) (*minecraft.Conn, error) {
+	addr := fmt.Sprintf("%s:%d", d.host, d.port)
+	deviceID := login.DeviceID(uuid.New().String())
+	platformOnlineID := uuid.New().String()
+	platformOfflineID := uuid.New().String()
+
 	clientData := login.ClientData{
-		DeviceOS:          7, // Windows 10/11
-		DeviceModel:       "Custom PC (Ryzen 7, RTX 4060)",
-		DeviceID:          login.DeviceID(uuid.New().String()),
-		ClientRandomID:    time.Now().UnixNano(),
-		GameVersion:       gameVersion,
-		ServerAddress:     fmt.Sprintf("%s:%d", d.host, d.port),
-		SkinID:            "GeometryCustomSkin",
-		TrustedSkin:       true,
-		LanguageCode:      "ru_RU",
-		CurrentInputMode:  1, // Клавиатура + Мышь
-		DefaultInputMode:  1,
-		PlatformOnlineID:  uuid.New().String(),
-		PlatformOfflineID: uuid.New().String(),
-		PremiumSkin:       true,
-		PersonaSkin:       false,
+		DeviceOS:           7,
+		DeviceModel:        "Windows 10",
+		DeviceID:           deviceID,
+		ClientRandomID:     time.Now().UnixNano(),
+		GameVersion:        ver,
+		ServerAddress:      addr,
+		SkinID:             "",
+		SkinData:           "",
+		SkinImageWidth:     64,
+		SkinImageHeight:    32,
+		SkinResourcePatch:  "",
+		SkinGeometry:       "",
+		SkinGeometryVersion: "",
+		SkinAnimationData:  "",
+		CapeID:             "",
+		CapeData:           "",
+		CapeImageWidth:     64,
+		CapeImageHeight:    32,
+		CapeOnClassicSkin:  false,
+		PersonaSkin:        true,
+		PremiumSkin:        true,
+		TrustedSkin:        true,
+		LanguageCode:       "ru_RU",
+		PlatformOnlineID:   platformOnlineID,
+		PlatformOfflineID:  platformOfflineID,
+		CurrentInputMode:   1,
+		DefaultInputMode:   1,
 	}
 
 	dialer := minecraft.Dialer{
@@ -84,119 +222,148 @@ func (d *Dumper) Run() error {
 		TokenSource: d.tokenSource,
 	}
 
-	addr := fmt.Sprintf("%s:%d", d.host, d.port)
-	logMsg(fmt.Sprintf("🚀 Запуск симуляции игрока. Подключение к %s...", addr))
-
-	// Увеличиваем таймаут ожидания пакетов до 45 секунд под прокси/VPN соединения
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	conn, err := dialer.DialContext(ctx, "raknet", addr)
 	if err != nil {
-		return fmt.Errorf("ошибка авторизации на сервере: %w", err)
+		return nil, err
 	}
-	d.conn = conn
-	defer d.conn.Close()
+	return conn, nil
+}
 
-	logMsg("\x1b[1;32m✅ Успешное вхождение в сеть сервера. Эмуляция завершена.\x1b[0m")
-	
-	// Ожидание завершения внутреннего хэндшейка со стороны ядра
-	time.Sleep(2 * time.Second)
+func (d *Dumper) Run(version string) error {
+	// Подключаемся с повторами, используя точную версию
+	conn, err := d.connectWithRetry(version, 5)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
 
-	packs := d.conn.ResourcePacks()
+	logMsg("\x1b[1;32m✅ Соединение установлено! Запрашиваем ресурс-паки...\x1b[0m")
+
+	// Ожидаем полную синхронизацию мира, чтобы сервер прислал ResourcePacksInfo
+	select {
+	case <-conn.Closing():
+		return fmt.Errorf("соединение закрыто сервером до получения паков")
+	case <-time.After(10 * time.Second):
+		// даём время на передачу пакетов
+	}
+
+	packs := conn.ResourcePacks()
 	if len(packs) == 0 {
-		logMsg("\x1b[1;33m⚠️ Сервер успешно принял сессию, но не передал массив ресурс-паков.\x1b[0m")
+		logMsg("\x1b[1;33m⚠️ Сервер не прислал паки (возможно, требует дополнительной авторизации).\x1b[0m")
 		return nil
 	}
 
-	logMsg(fmt.Sprintf("\x1b[1;36m📦 Обнаружено доступных ресурс-паков: %d\x1b[0m", len(packs)))
+	outputPacksDir := filepath.Join(baseDir, outputDir)
+	logMsg(fmt.Sprintf("\x1b[1;36m📦 Найдено %d пак(ов). Сохраняем в %s\x1b[0m", len(packs), outputPacksDir))
 
 	for i, pack := range packs {
-		logMsg(fmt.Sprintf("   📥 [%d/%d] Чтение потока: %s", i+1, len(packs), pack.UUID().String()))
-		if err := d.downloadPack(pack); err != nil {
+		logMsg(fmt.Sprintf("   📥 [%d/%d] Загрузка %s", i+1, len(packs), pack.UUID().String()))
+		if err := d.downloadPack(pack, outputPacksDir); err != nil {
 			logMsg(fmt.Sprintf("\x1b[1;31m      ❌ Ошибка: %v\x1b[0m", err))
 		}
 	}
 
+	logMsg("\x1b[1;35m🏁 Все ресурс-паки успешно выкачаны!\x1b[0m")
 	return nil
 }
 
-func (d *Dumper) downloadPack(pack interface{}) error {
+func (d *Dumper) downloadPack(pack interface{}, targetDir string) error {
 	type Pack interface {
 		UUID() uuid.UUID
 		Reader() io.ReadCloser
 	}
 	p, ok := pack.(Pack)
 	if !ok {
-		return fmt.Errorf("неверный тип структуры данных пакета")
+		return fmt.Errorf("неверный тип пака")
 	}
-
 	rc := p.Reader()
 	if rc == nil {
-		return fmt.Errorf("пустой поток данных (заблокировано ядром сервера)")
+		return fmt.Errorf("нет данных для чтения")
 	}
 	defer rc.Close()
 
-	_ = os.MkdirAll(outputDir, os.ModePerm)
-	outPath := filepath.Join(outputDir, p.UUID().String()+".zip")
+	_ = os.MkdirAll(targetDir, os.ModePerm)
+	outPath := filepath.Join(targetDir, p.UUID().String()+".zip")
 	f, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("ошибка создания локального файла: %w", err)
+		return err
 	}
 	defer f.Close()
 
-	buf := make([]byte, 1024*1024)
-	var written int64
-
-	for {
-		n, readErr := rc.Read(buf)
-		if n > 0 {
-			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
-				return fmt.Errorf("ошибка записи: %w", writeErr)
-			}
-			written += int64(n)
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				break
-			}
-			return fmt.Errorf("ошибка чтения потока: %w", readErr)
-		}
-	}
-
+	written, _ := io.Copy(f, rc)
 	sizeMB := float64(written) / (1024 * 1024)
-	logMsg(fmt.Sprintf("\x1b[1;32m      ✅ Файл успешно выгружен (Размер: %.2f MB)\x1b[0m", sizeMB))
+	logMsg(fmt.Sprintf("\x1b[1;32m      ✅ Сохранён: %s (%.2f MB)\x1b[0m", filepath.Base(outPath), sizeMB))
 	return nil
 }
 
 func main() {
+	initPaths()
 	_ = os.WriteFile(logFile, []byte("--- Dumper Log Start ---\n"), 0644)
 
 	logMsg("\x1b[1;35m╔══════════════════════════════════════════════════════╗\x1b[0m")
-	logMsg("\x1b[1;35m║     🛸  NeverTime Client Emulator v11.1 (Go)       ║\x1b[0m")
+	logMsg("\x1b[1;35m║  🛸 NeverTime RP Dumper v14.0 (Smart Ping + Bruteforce)  ║\x1b[0m")
 	logMsg("\x1b[1;35m╚══════════════════════════════════════════════════════╝\x1b[0m")
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Введите 'packs' для старта: ")
+	fmt.Print("Введите 'packs' для запуска: ")
 	cmd, _ := reader.ReadString('\n')
 	if strings.TrimSpace(cmd) != "packs" {
 		return
 	}
 
-	fmt.Print("IP:Порт сервера: ")
+	fmt.Print("IP:Порт сервера (например mc.nevertime.su:19132): ")
 	input, _ := reader.ReadString('\n')
 	host, port := splitHostPort(strings.TrimSpace(input))
 
-	logMsg("\x1b[1;33m⏳ Запуск процесса обмена токенов Xbox Live...\x1b[0m")
+	// 1. Пробуем определить версию через пинг
+	logMsg("\x1b[1;33m⏳ Пинг сервера для определения версии...\x1b[0m")
+	version, motd, err := pingServer(host, port)
+	if err != nil {
+		logMsg(fmt.Sprintf("❌ Пинг не удался: %v", err))
+		logMsg("Будет использован ручной перебор версий.")
+		version = "" // оставляем пустой, чтобы применить список
+	} else {
+		logMsg(fmt.Sprintf("✅ Сервер ответил: %s (версия %s)", motd, version))
+	}
+
+	// 2. Если версию не получили, используем актуальный список
+	if version == "" {
+		versionsToTry := []string{
+			"1.21.30", "1.21.20", "1.21.0", "1.20.80", "1.20.50", "1.20.30",
+			"1.20.10", "1.20.0", "1.19.80", "1.19.70",
+		}
+		for _, v := range versionsToTry {
+			logMsg(fmt.Sprintf("Пробуем версию %s...", v))
+			conn, err := NewDumper(host, port, nil).tryConnect(v) // временный объект для теста
+			if err == nil {
+				logMsg(fmt.Sprintf("\x1b[1;32m🔥 Подошла версия %s\x1b[0m", v))
+				version = v
+				conn.Close()
+				break
+			}
+		}
+	}
+
+	if version == "" {
+		logMsg("\x1b[1;31m❌ Не удалось определить рабочую версию. Выход.\x1b[0m")
+		return
+	}
+
+	// 3. Xbox-авторизация
+	logMsg("\x1b[1;33m⏳ Авторизация Xbox Live...\x1b[0m")
 	token, err := auth.RequestLiveToken()
 	if err != nil {
-		logMsg(fmt.Sprintf("❌ Критическая ошибка авторизации Live: %v", err))
+		logMsg(fmt.Sprintf("❌ Ошибка Xbox: %v", err))
 		return
 	}
 	tokenSrc := oauth2.StaticTokenSource(token)
+	logMsg("\x1b[1;32m✅ Xbox-авторизация пройдена.\x1b[0m")
 
 	dumper := NewDumper(host, port, tokenSrc)
-	if err := dumper.Run(); err != nil {
-		logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка выполнения: %v\x1b[0m", err))
+	if err := dumper.Run(version); err != nil {
+		logMsg(fmt.Sprintf("\x1b[1;31m❌ Критическая ошибка: %v\x1b[0m", err))
 	}
 }
