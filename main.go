@@ -227,8 +227,8 @@ func main() {
 			logMsg(fmt.Sprintf("\x1b[1;31m❌ Ошибка получения токена: %v\x1b[0m", err))
 			return
 		}
-		// Используем RefreshTokenSource для создания работающего TokenSource
-		tokenSrc = auth.RefreshTokenSource(token, nil)
+		// Простой способ: StaticTokenSource – токен уже содержит refresh, но для короткой сессии подойдёт
+		tokenSrc = oauth2.StaticTokenSource(token)
 		logMsg("\x1b[1;32m✅ Xbox-авторизация выполнена.\x1b[0m")
 	} else {
 		tokenSrc = nil
