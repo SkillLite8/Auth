@@ -1,4 +1,4 @@
-name: Build Go Executable
+name: Build Python Autoclicker
 
 on:
   push:
@@ -8,36 +8,32 @@ on:
 
 jobs:
   build-windows:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest # Обязательно Windows из-за windll
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        go-version: '1.21'
-        cache: true # Включает кэширование модулей для ускорения сборки
+        python-version: '3.11'
+        cache: 'pip' # Кэшируем зависимости pip
 
-    - name: Initialize Go Module & Fetch Dependencies
+    - name: Install dependencies
       run: |
-        go mod init dumper
-        go get github.com/sandertv/gophertunnel@master
-        go get github.com/google/uuid
-        go mod tidy
+        python -m pip install --upgrade pip
+        pip install keyboard pyinstaller
 
-    - name: Compile to Windows EXE
-      env:
-        GOOS: windows
-        GOARCH: amd64
+    - name: Compile to EXE
+      # --onefile собирает все в один .exe
+      # --windowed убирает черное консольное окно на фоне
       run: |
-        mkdir -p dist # Создаем директорию dist на случай, если ее нет
-        go build -ldflags="-s -w" -o dist/dumper.exe main.go
+        pyinstaller --noconfirm --onefile --windowed --name "SpeedAutoClicker" main.py
 
     - name: Upload Artifact (.EXE)
       uses: actions/upload-artifact@v4
       with:
-        name: NeverTime-RP-Dumper-Windows
-        path: dist/dumper.exe
-        if-no-files-found: error # Выдаст ошибку в логах, если exe не скомпилировался
+        name: SpeedAutoClicker-Windows
+        path: dist/SpeedAutoClicker.exe
+        if-no-files-found: error
