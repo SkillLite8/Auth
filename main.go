@@ -228,7 +228,8 @@ func main() {
 	version := ""
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pong, err := minecraft.PingContext(ctx, fmt.Sprintf("%s:%d", host, port))
+	// Правильный вызов: Ping(ctx, address)
+	pong, err := minecraft.Ping(ctx, fmt.Sprintf("%s:%d", host, port))
 	if err == nil {
 		version = pong.Version
 		logMsg(fmt.Sprintf("✅ Версия сервера: %s", version))
