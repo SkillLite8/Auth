@@ -48,11 +48,15 @@ jobs:
       - name: Find Godot project
         shell: bash
         run: |
-          echo "Searching for project.godot..."
-          PROJECT_FILE=$(find extracted_project -name project.godot -type f | head -n 1)
+          echo "Searching for project.godot recursively inside extracted_project..."
+          
+          # Выводим структуру папок для отладки в логах
+          find extracted_project -maxdepth 3 -not -path '*/.*'
+          
+          PROJECT_FILE=$(find extracted_project -name "project.godot" -type f | head -n 1)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: project.godot not found inside the ZIP archive!"
+            echo "ERROR: project.godot not found anywhere inside the ZIP archive!"
             exit 1
           fi
 
