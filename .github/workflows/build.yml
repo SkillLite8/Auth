@@ -1,8 +1,15 @@
-name: Build PHAR
+
+name: Build BELOW Windows EXE
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -12,34 +19,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
         with:
-          php-version: "8.2"
+          version: 4.7.2
+          use-dotnet: false
 
-      - name: Extract ZIP
+      - name: Install export templates
         run: |
-          mkdir source
-          unzip ReCore.zip -d source
+          godot --headless --editor --path . --quit
 
-      - name: Create PHAR
+      - name: Export Windows EXE
         run: |
-          cat > build.php << 'EOF'
-          <?php
+          mkdir -p exports
+          godot --headless --path . \
+            --export-release "Windows Desktop" \
+            exports/BELOW.exe
 
-          $phar = new Phar("ReCore.phar");
-          $phar->startBuffering();
-          $phar->buildFromDirectory("source");
-          $phar->setStub($phar->createDefaultStub("src/PocketMine.php"));
-          $phar->stopBuffering();
-
-          echo "PHAR created\n";
-          EOF
-
-          php -d phar.readonly=0 build.php
-
-      - name: Upload Artifact
+      - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: ReCore-PHAR
-          path: ReCore.phar
+          name: BELOW-Windows
+          path: exports/
+          if-no-files-found: error
