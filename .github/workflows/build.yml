@@ -3,7 +3,7 @@ name: Build BELOW for Windows
 on:
   workflow_dispatch:
   push:
-  _branches:
+    branches:
       - main
       - master
 
@@ -25,8 +25,7 @@ jobs:
           echo "Looking for ZIP archives..."
           ls -la
           
-          # Ищем zip-файл (в данном случае BELOW-Godot-Project.zip)
-          ZIP_FILE=$(find . -name "BELOW-Godot-Project.zip" -o -name "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -name "BELOW-Godot-Project.zip" -o -name "*.zip" | head -n 1)
           
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: ZIP file not found in the repository!"
@@ -35,11 +34,9 @@ jobs:
           
           echo "Found ZIP archive: $ZIP_FILE"
           echo "Extracting archive..."
-          
-          # Распаковываем во временную папку или текущую директорию
           unzip -q "$ZIP_FILE" -d extracted_project
           
-          echo "Extraction complete. Contents of extracted_project:"
+          echo "Extraction complete. Contents:"
           ls -la extracted_project
 
       - name: Install Godot
@@ -51,7 +48,7 @@ jobs:
       - name: Find Godot project
         shell: bash
         run: |
-          echo "Searching for project.godot inside extracted files..."
+          echo "Searching for project.godot..."
           PROJECT_FILE=$(find extracted_project -name project.godot -type f | head -n 1)
 
           if [ -z "$PROJECT_FILE" ]; then
@@ -66,16 +63,16 @@ jobs:
       - name: Install export templates
         shell: bash
         run: |
-          godot --headless --editor --path "$$GODOT_PROJECT" --import || true
-          godot --headless --editor --path "$$GODOT_PROJECT" --quit
+          godot --headless --editor --path "$GODOT_PROJECT" --import || true
+          godot --headless --editor --path "$GODOT_PROJECT" --quit
 
       - name: Export Windows EXE
         shell: bash
         run: |
-          mkdir -p "$$GODOT_PROJECT/exports"
-          godot --headless --path "$$GODOT_PROJECT" \
+          mkdir -p "$GODOT_PROJECT/exports"
+          godot --headless --path "$GODOT_PROJECT" \
             --export-release "Windows Desktop" \
-            "$$GODOT_PROJECT/exports/BELOW.exe"
+            "$GODOT_PROJECT/exports/BELOW.exe"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
