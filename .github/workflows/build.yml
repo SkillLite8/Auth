@@ -1,5 +1,5 @@
 
-name: Build BELOW Windows EXE
+name: Build BELOW for Windows
 
 on:
   workflow_dispatch:
@@ -12,33 +12,59 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-windows:
+    name: Build Windows EXE
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Download repository
         uses: actions/checkout@v4
 
-      - name: Setup Godot
+      - name: Install Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
           use-dotnet: false
 
-      - name: Install export templates
+      - name: Find Godot project
+        shell: bash
         run: |
-          godot --headless --editor --path . --quit
+          echo "Searching for project.godot..."
+          find . -name project.godot -not -path './.git/*' -type f
+
+          if [ -f "project.godot" ]; then
+            echo "GODOT_PROJECT=." >> "$GITHUB_ENV"
+          else
+            PROJECT_FILE=$(find . -name project.godot -not -path './.git/*' -type f | head -n 1)
+
+            if [ -z "$PROJECT_FILE" ]; then
+              echo "ERROR: project.godot not found!"
+              echo "Upload the Godot project files to the repository."
+              exit 1
+            fi
+
+            echo "GODOT_PROJECT=$(dirname "$PROJECT_FILE")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install export templates
+        shell: bash
+        run: |
+          godot --headless --editor --path "$GODOT_PROJECT" --import || true
+          godot --headless --editor --path "$GODOT_PROJECT" --quit
 
       - name: Export Windows EXE
+        shell: bash
         run: |
-          mkdir -p exports
-          godot --headless --path . \
+          mkdir -p "$GODOT_PROJECT/exports"
+          godot --headless --path "$GODOT_PROJECT" \
             --export-release "Windows Desktop" \
-            exports/BELOW.exe
+            "$GODOT_PROJECT/exports/BELOW.exe"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: BELOW-Windows
-          path: exports/
+          path: |
+            **/exports/BELOW.exe
+            **/exports/BELOW.pck
           if-no-files-found: error
