@@ -1,3 +1,4 @@
+
 name: Build BELOW for Windows
 
 on:
@@ -19,43 +20,68 @@ jobs:
       - name: Download repository
         uses: actions/checkout@v4
 
-      - name: Extract project ZIP
+      - name: Find and extract BELOW ZIP
         shell: bash
         run: |
-          echo "Looking for ZIP archives..."
-          ls -la
-          
-          ZIP_FILE=$(find . -maxdepth 2 -name "BELOW-Godot-Project.zip" -o -name "*.zip" | head -n 1)
-          
+          set -euo pipefail
+
+          echo "Searching for BELOW-Godot-Project.zip..."
+
+          ZIP_FILE=$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name "BELOW-Godot-Project.zip" \
+            -print -quit)
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found in the repository!"
+            echo "ERROR: BELOW-Godot-Project.zip not found!"
+            echo "Repository files:"
+            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f
             exit 1
           fi
-          
-          echo "Found ZIP archive: $ZIP_FILE"
-          echo "Extracting archive..."
-          mkdir -p extracted_project
-          unzip -q "$ZIP_FILE" -d extracted_project
-          
-          echo "=== Full contents of extracted_project ==="
-          find extracted_project -maxdepth 3
+
+          echo "Found archive: $ZIP_FILE"
+
+          mkdir -p "$GITHUB_WORKSPACE/extracted_project"
+
+          unzip -oq "$ZIP_FILE" \
+            -d "$GITHUB_WORKSPACE/extracted_project"
+
+          echo "Archive extracted successfully."
+
+          echo "Searching extracted files..."
+          find "$GITHUB_WORKSPACE/extracted_project" \
+            -maxdepth 4 -type f | head -n 100
 
       - name: Find Godot project
         shell: bash
         run: |
+          set -euo pipefail
+
           echo "Searching for project.godot..."
-          
-          # Ищем файл project.godot во всех вложенных папках автоматически
-          PROJECT_FILE=$(find extracted_project -name "project.godot" -type f | head -n 1)
-          
+
+          PROJECT_FILE=$(find \
+            "$GITHUB_WORKSPACE/extracted_project" \
+            -type f \
+            -name "project.godot" \
+            -print -quit)
+
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: project.godot still not found!"
+            echo "ERROR: project.godot not found!"
+            find "$GITHUB_WORKSPACE/extracted_project" -maxdepth 5
             exit 1
           fi
-          
+
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
+          if [ ! -f "$PROJECT_DIR/export_presets.cfg" ]; then
+            echo "ERROR: export_presets.cfg not found!"
+            exit 1
+          fi
+
           echo "GODOT_PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project directory: $PROJECT_DIR"
+
+          echo "Godot project: $PROJECT_DIR"
+          echo "Export presets found."
 
       - name: Install Godot
         uses: chickensoft-games/setup-godot@v2
@@ -63,25 +89,61 @@ jobs:
           version: 4.7.2
           use-dotnet: false
 
-      - name: Install export templates
+      - name: Import Godot project
         shell: bash
         run: |
-          godot --headless --editor --path "$GODOT_PROJECT" --import || true
-          godot --headless --editor --path "$GODOT_PROJECT" --quit
+          set -euo pipefail
+
+          godot --version
+
+          godot --headless \
+            --editor \
+            --path "$GODOT_PROJECT" \
+            --import
+
+          echo "Godot project import completed."
+
+      - name: Validate project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking project files..."
+
+          test -f "$GODOT_PROJECT/project.godot"
+          test -f "$GODOT_PROJECT/export_presets.cfg"
+
+          echo "Project files verified."
 
       - name: Export Windows EXE
         shell: bash
         run: |
-          mkdir -p "$GODOT_PROJECT/exports"
-          godot --headless --path "$GODOT_PROJECT" \
-            --export-release "Windows Desktop" \
-            "$GODOT_PROJECT/exports/BELOW.exe"
+          set -euo pipefail
 
-      - name: Upload Windows build
+          OUTPUT_DIR="$GODOT_PROJECT/exports"
+          OUTPUT_EXE="$OUTPUT_DIR/BELOW.exe"
+
+          mkdir -p "$OUTPUT_DIR"
+
+          echo "Exporting Windows Desktop..."
+
+          godot --headless \
+            --path "$GODOT_PROJECT" \
+            --export-release "Windows Desktop" \
+            "$OUTPUT_EXE"
+
+          if [ ! -s "$OUTPUT_EXE" ]; then
+            echo "ERROR: Windows EXE was not created!"
+            exit 1
+          fi
+
+          echo "Build completed successfully!"
+          ls -lh "$OUTPUT_EXE"
+
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: BELOW-Windows
-          path: |
-            **/exports/BELOW.exe
-            **/exports/BELOW.pck
+          path: extracted_project/**/exports/BELOW.exe
           if-no-files-found: error
+          retention-days: 14
