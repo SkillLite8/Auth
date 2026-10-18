@@ -37,31 +37,31 @@ jobs:
           mkdir -p extracted_project
           unzip -q "$ZIP_FILE" -d extracted_project
           
-          echo "=== Contents of extracted_project ==="
-          ls -R extracted_project
+          echo "=== Full contents of extracted_project ==="
+          find extracted_project -maxdepth 3
 
       - name: Find Godot project
         shell: bash
         run: |
           echo "Searching for project.godot..."
           
-          # Проверяем точный путь для вашей структуры (extracted_project/BELOW/project.godot)
-          if [ -f "extracted_project/BELOW/project.godot" ]; then
-            echo "GODOT_PROJECT=extracted_project/BELOW" >> "$GITHUB_ENV"
-            echo "Found project directory: extracted_project/BELOW"
-          else
-            # Универсальный поиск, если структура отличается
-            PROJECT_FILE=$(find extracted_project -name "project.godot" -type f | head -n 1)
-            
-            if [ -z "$PROJECT_FILE" ]; then
-              echo "ERROR: project.godot still not found!"
-              exit 1
-            fi
-            
-            PROJECT_DIR=$(dirname "$PROJECT_FILE")
-            echo "GODOT_PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
-            echo "Found project directory: $PROJECT_DIR"
+          # Ищем файл project.godot во всех вложенных папках автоматически
+          PROJECT_FILE=$(find extracted_project -name "project.godot" -type f | head -n 1)
+          
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot still not found!"
+            exit 1
           fi
+          
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "GODOT_PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found project directory: $PROJECT_DIR"
+
+      - name: Install Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
 
       - name: Install export templates
         shell: bash
@@ -85,4 +85,3 @@ jobs:
             **/exports/BELOW.exe
             **/exports/BELOW.pck
           if-no-files-found: error
-
