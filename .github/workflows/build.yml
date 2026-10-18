@@ -1,10 +1,9 @@
-
 name: Build BELOW for Windows
 
 on:
   workflow_dispatch:
   push:
-    branches:
+  _branches:
       - main
       - master
 
@@ -20,6 +19,29 @@ jobs:
       - name: Download repository
         uses: actions/checkout@v4
 
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          echo "Looking for ZIP archives..."
+          ls -la
+          
+          # Ищем zip-файл (в данном случае BELOW-Godot-Project.zip)
+          ZIP_FILE=$(find . -name "BELOW-Godot-Project.zip" -o -name "*.zip" | head -n 1)
+          
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found in the repository!"
+            exit 1
+          fi
+          
+          echo "Found ZIP archive: $ZIP_FILE"
+          echo "Extracting archive..."
+          
+          # Распаковываем во временную папку или текущую директорию
+          unzip -q "$ZIP_FILE" -d extracted_project
+          
+          echo "Extraction complete. Contents of extracted_project:"
+          ls -la extracted_project
+
       - name: Install Godot
         uses: chickensoft-games/setup-godot@v2
         with:
@@ -29,36 +51,31 @@ jobs:
       - name: Find Godot project
         shell: bash
         run: |
-          echo "Searching for project.godot..."
-          find . -name project.godot -not -path './.git/*' -type f
+          echo "Searching for project.godot inside extracted files..."
+          PROJECT_FILE=$(find extracted_project -name project.godot -type f | head -n 1)
 
-          if [ -f "project.godot" ]; then
-            echo "GODOT_PROJECT=." >> "$GITHUB_ENV"
-          else
-            PROJECT_FILE=$(find . -name project.godot -not -path './.git/*' -type f | head -n 1)
-
-            if [ -z "$PROJECT_FILE" ]; then
-              echo "ERROR: project.godot not found!"
-              echo "Upload the Godot project files to the repository."
-              exit 1
-            fi
-
-            echo "GODOT_PROJECT=$(dirname "$PROJECT_FILE")" >> "$GITHUB_ENV"
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot not found inside the ZIP archive!"
+            exit 1
           fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "GODOT_PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found project directory: $PROJECT_DIR"
 
       - name: Install export templates
         shell: bash
         run: |
-          godot --headless --editor --path "$GODOT_PROJECT" --import || true
-          godot --headless --editor --path "$GODOT_PROJECT" --quit
+          godot --headless --editor --path "$$GODOT_PROJECT" --import || true
+          godot --headless --editor --path "$$GODOT_PROJECT" --quit
 
       - name: Export Windows EXE
         shell: bash
         run: |
-          mkdir -p "$GODOT_PROJECT/exports"
-          godot --headless --path "$GODOT_PROJECT" \
+          mkdir -p "$$GODOT_PROJECT/exports"
+          godot --headless --path "$$GODOT_PROJECT" \
             --export-release "Windows Desktop" \
-            "$GODOT_PROJECT/exports/BELOW.exe"
+            "$$GODOT_PROJECT/exports/BELOW.exe"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
